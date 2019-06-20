@@ -13,6 +13,7 @@ ARGS = parser.parse_args()
 
 DATA_FOLDER = 'data/'
 
+print(ARGS.kaggle_dataset)  
 
 def download_dataset(kaggle_dataset, data_folder):
     os.makedirs(data_folder, exist_ok=True)
