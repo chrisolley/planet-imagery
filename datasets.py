@@ -13,7 +13,7 @@ class PlanetDataset(Dataset):
         self.df = pd.read_csv(csv_path)
         self.img_folder = img_folder
         self.mlb = MultiLabelBinarizer()
-        self.y = mlb.fit_transform([tag.split() for tag in self.df.tags])
+        self.y = self.mlb.fit_transform([tag.split() for tag in self.df.tags])
         self.transforms = transforms
 
     def __len__(self):
