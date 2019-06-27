@@ -16,11 +16,12 @@ from torch.utils.data import DataLoader
 import torch.optim as optim
 import torch.nn.functional as F
 from datasets import PlanetDataset
-from models import Resnet34
+from models import Net
 from optimizer import lr_scheduler, create_optimizer
 from logger import setup_logs
 from helper_functions import save_model
 from validation import validate
+
 
 # directories
 DATA_DIR = os.path.abspath('data/')
@@ -33,11 +34,11 @@ with open(os.path.join(DATA_DIR, 'partition.p'), 'rb') as f:
     partition = pickle.load(f)
 
 # set up logs
-run_name = time.strftime("%Y-%m-%d_%H%M-") + "resnet34"
+run_name = time.strftime("%Y-%m-%d_%H%M-") + "custom_net"
 logger = setup_logs(SAVE_DIR, run_name)
 
 # model
-model = Resnet34(num_classes=17).cuda()
+model = Net(num_classes=17).cuda()
 
 # datasets
 train_ds = PlanetDataset(os.path.join(DATA_DIR, 'train-jpg'), 
@@ -62,18 +63,18 @@ val_dl = DataLoader(val_ds,
                     num_workers=4,
                     pin_memory=True)
 
-init_lr = 0.01
-epochs = 100
+# lr
+init_lr = 0.001
+epochs = 40
 
 # training loop
 def train(model, init_lr, epochs, train_dl, val_dl):
     best_score = 0.0
-    optimizer = create_optimizer(model, init_lr)
-    iterations = epochs*len(train_dl)
-    idx = 0
+    optimizer = torch.optim.Adam(model.parameters(), lr=init_lr)
+    
     for epoch in range(epochs):
         lr = lr_scheduler(epoch, 0.5, init_lr, 5)
-        optimizer = create_optimizer(model, lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         for batch_idx, (data, target) in enumerate(train_dl):
             data, target = data.cuda().float(), target.cuda().float()
             output = model(data)
@@ -81,13 +82,6 @@ def train(model, init_lr, epochs, train_dl, val_dl):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            idx += 1
-            if idx == int(0.1*iterations):
-                model.unfreeze(1)
-                logger.info("Iteration %d: Unfreezing group 1" % idx)
-            if idx == int(0.2*iterations):
-                model.unfreeze(0)
-                logger.info("Iteration %d: Unfreezing group 0" % idx)
             if batch_idx % 100 == 0:
                 logger.info("Epoch %d (Batch %d / %d)\t Train loss: %.3f" % \
                     (epoch+1, batch_idx, len(train_dl), loss.item()))
@@ -96,11 +90,10 @@ def train(model, init_lr, epochs, train_dl, val_dl):
             (epoch+1, val_loss, val_f2_score))
         if val_f2_score > best_score:
             best_score = val_f2_score
-            best_model_path = os.path.join(SAVE_DIR, 'model_resnet34_%d.pth' % \
+            file_path = os.path.join('models', 'model_net_%d.pth' % \
                 (100*val_f2_score))
-            logger.info("Saving model to %s" % best_model_path)
-            save_model(model, best_model_path)
-    return best_model_path
+            logger.info("Saving model to %s" % file_path)
+            save_model(model, file_path)
 
 if __name__ == '__main__':
     train(model, init_lr, epochs, train_dl, val_dl)
