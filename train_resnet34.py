@@ -24,8 +24,6 @@ from validation import validate
 
 # directories
 DATA_DIR = './data'
-TEST_JPEG_DIR = os.path.join(DATA_DIR, 'test-jpg')
-TEST_JPEG_ADD_DIR = os.path.join(DATA_DIR, 'test-jpg-additional')
 LOG_DIR = './logs'
 MODEL_DIR = './models'
 

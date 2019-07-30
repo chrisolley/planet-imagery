@@ -25,8 +25,6 @@ from validation import validate
 
 # directories
 DATA_DIR = './data'
-TEST_JPEG_DIR = os.path.join(DATA_DIR, 'test-jpg')
-TEST_JPEG_ADD_DIR = os.path.join(DATA_DIR, 'test-jpg-additional')
 LOG_DIR = './logs'
 MODEL_DIR = './models'
 
@@ -76,7 +74,6 @@ def main(model, run_name, partition, batch_size, epochs):
                         os.path.join(DATA_DIR, 'train_v2.csv'))
 
     # data loaders
-    batch_size = 64
     train_dl = DataLoader(train_ds,
                         batch_size=batch_size,
                         num_workers=4,
