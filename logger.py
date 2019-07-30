@@ -5,6 +5,8 @@ import logging
 import os
 
 def setup_logs(save_dir, run_name):
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
     logger = logging.getLogger('Planet-Imagery')
     logger.setLevel(logging.INFO)
  

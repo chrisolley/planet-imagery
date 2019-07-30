@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import pickle
+from sklearn.model_selection import train_test_split
 
 # directories
 DATA_DIR = os.path.abspath('data/')

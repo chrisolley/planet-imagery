@@ -24,10 +24,11 @@ from validation import validate
 
 
 # directories
-DATA_DIR = os.path.abspath('data/')
+DATA_DIR = os.path.abspath('./data')
 TEST_JPEG_DIR = os.path.join(DATA_DIR, 'test-jpg')
 TEST_JPEG_ADD_DIR = os.path.join(DATA_DIR, 'test-jpg-additional')
-SAVE_DIR = './snapshots'
+LOG_DIR = './logs'
+MODEL_DIR = './models'
 
 # read in data splits
 with open(os.path.join(DATA_DIR, 'partition.p'), 'rb') as f:
@@ -35,7 +36,11 @@ with open(os.path.join(DATA_DIR, 'partition.p'), 'rb') as f:
 
 # set up logs
 run_name = time.strftime("%Y-%m-%d_%H%M-") + "custom_net"
-logger = setup_logs(SAVE_DIR, run_name)
+logger = setup_logs(LOG_DIR, run_name)
+
+# create model save dir
+if not os.path.exists(MODEL_DIR):
+    os.makedirs(MODEL_DIR)
 
 # model
 model = Net(num_classes=17).cuda()
@@ -63,18 +68,13 @@ val_dl = DataLoader(val_ds,
                     num_workers=4,
                     pin_memory=True)
 
-# lr
-init_lr = 0.001
-epochs = 40
-
 # training loop
-def train(model, init_lr, epochs, train_dl, val_dl):
+def train(model, base_optimizer, init_lr, epochs, train_dl, val_dl):
     best_score = 0.0
-    optimizer = torch.optim.Adam(model.parameters(), lr=init_lr)
-    
+    optimizer = base_optimizer(model.parameters(), lr=init_lr)
     for epoch in range(epochs):
-        lr = lr_scheduler(epoch, 0.5, init_lr, 5)
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        lr = lr_scheduler(epoch, 0.1, init_lr, 5)
+        optimizer = base_optimizer(model.parameters(), lr=lr)
         for batch_idx, (data, target) in enumerate(train_dl):
             data, target = data.cuda().float(), target.cuda().float()
             output = model(data)
@@ -96,4 +96,11 @@ def train(model, init_lr, epochs, train_dl, val_dl):
             save_model(model, file_path)
 
 if __name__ == '__main__':
-    train(model, init_lr, epochs, train_dl, val_dl)
+    # model
+    model = Net(num_classes=17).cuda()
+    # lr
+    base_optimizer = optim.Adam
+    init_lr = 0.001
+    # training
+    epochs = 40
+    train(model, base_optimizer, init_lr, epochs, train_dl, val_dl)

@@ -2,37 +2,82 @@ from tqdm import tqdm
 import os
 import numpy as np
 import pandas as pd
+import pickle
 import time
 from train_resnet34 import train
-from models import Resnet34
+from models import Resnet34, Net
 from sklearn.model_selection import KFold
 from logger import setup_logs
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from datasets import PlanetDataset
+from helper_functions import load_model
 
 DATA_DIR = os.path.abspath('data/')
-SAVE_DIR = './snapshots'
-train_file_names = list(os.listdir(os.path.join(DATA_DIR, 'train-jpg')))
-test_file_names = list(os.listdir(os.path.join(DATA_DIR, 'test-jpg')))
-test_add_file_names = list(os.listdir(os.path.join(DATA_DIR, 'test-jpg-additional')))
+LOG_DIR = './logs'
+MODEL_DIR = './models'
 
-train_IDs = [f.split('.')[0] for f in train_file_names]
-test_IDs = [f.split('.')[0] for f in test_file_names]
-test_add_IDs = [f.split('.')[0] for f in test_add_file_names]
+with open(os.path.join(DATA_DIR, 'partition.p'), 'rb') as f:
+    partition = pickle.load(f)
 
 batch_size = 64
 
-run_name = time.strftime("%Y-%m-%d_%H%M-") + "prediction"
-logger = setup_logs(SAVE_DIR, run_name)
+# set model for prediction
+model = Net(num_classes=17).cuda()
+# model = Resnet34(num_classes=17).cuda()
+model_name = 'model_net_89'
+load_model(model, os.path.join(MODEL_DIR, model_name + '.pth'))
+
+run_name = time.strftime("%Y-%m-%d_%H%M-") + model_name + "prediction"
+logger = setup_logs(LOG_DIR, run_name)
+
+# create datasets and loaders
+
+test_ds = PlanetDataset(os.path.join(DATA_DIR, 'test-jpg'), 
+                         partition['test'],
+                         os.path.join(DATA_DIR, 'sample_submission_v2.csv'))
+
+test_add_ds = PlanetDataset(os.path.join(DATA_DIR, 'test-jpg-additional'),
+                            partition['test_add'],
+                            os.path.join(DATA_DIR, 'sample_submission_v2.csv'))
+
+test_ds_aug = PlanetDataset(os.path.join(DATA_DIR, 'test-jpg'),
+                            partition['test'],
+                            os.path.join(DATA_DIR, 'sample_submission_v2.csv'),
+                            True)
+
+test_add_ds_aug = PlanetDataset(os.path.join(DATA_DIR, 'test-jpg-additional'),
+                                partition['test_add'],
+                                os.path.join(DATA_DIR, 'sample_submission_v2.csv'),
+                                True)
+
+test_dl = DataLoader(test_ds,
+                    batch_size=batch_size,
+                    num_workers=4,
+                    pin_memory=True)
+
+test_dl_aug = DataLoader(test_ds_aug,
+                        batch_size=batch_size,
+                        num_workers=4,
+                        pin_memory=True)
+
+test_add_dl = DataLoader(test_add_ds,
+                        batch_size=batch_size,
+                        num_workers=4,
+                        pin_memory=True)
+
+test_add_dl_aug = DataLoader(test_add_ds_aug,
+                            batch_size=batch_size,
+                            num_workers=4,
+                            pin_memory=True)
 
 
 def make_test_predictions(model, test_dl):
     predictions = []
     model.eval()
     with torch.no_grad():
-        for data in tqdm(test_dl, desc='Test prediction', total=len(test_dl)):
+        for data, _ in tqdm(test_dl, desc='Test prediction', total=len(test_dl)):
             data = data.cuda().float()
             pred = model(data)
             predictions.append(F.sigmoid(pred).cpu().numpy())
@@ -47,45 +92,6 @@ def make_tta_prediction(model, test_dl, test_dl_aug, n_tta):
     tta_predictions = tta_predictions + [predictions]
     tta_predictions = np.mean(tta_predictions, axis=0)
     return tta_predictions
-
-
-test_ds = PlanetDataset(os.path.join(DATA_DIR, 'test-jpg'),
-                        test_IDs,
-                        os.path.join(DATA_DIR, 'sample_submission_v2.csv'))
-
-test_add_ds = PlanetDataset(os.path.join(DATA_DIR, 'train-jpg'),
-                            test_add_IDs,
-                            os.path.join(DATA_DIR, 'sample_submission_v2.csv'))
-
-test_ds_aug = PlanetDataset(os.path.join(DATA_DIR, 'test-jpg'),
-                            test_IDs,
-                            os.path.join(DATA_DIR, 'sample_submission_v2.csv'),
-                            True)
-
-test_add_ds_aug = PlanetDataset(os.path.join(DATA_DIR, 'test-jpg'),
-                                test_add_IDs,
-                                os.path.join(DATA_DIR, 'sample_submission_v2.csv'),
-                                True)
-
-test_dl = DataLoader(test_ds,
-                     batch_size=batch_size,
-                     num_workers=4,
-                     pin_memory=True)
-
-test_dl_aug = DataLoader(test_ds_aug,
-                         batch_size=batch_size,
-                         num_workers=4,
-                         pin_memory=True)
-
-test_add_dl = DataLoader(test_add_ds,
-                         batch_size=batch_size,
-                         num_workers=4,
-                         pin_memory=True)
-
-test_add_dl_aug = DataLoader(test_add_ds_aug,
-                             batch_size=batch_size,
-                             num_workers=4,
-                             pin_memory=True)
 
 
 def k_fold_predict(n_splits):
@@ -132,23 +138,31 @@ def k_fold_predict(n_splits):
     overall_pred_add = np.mean(overall_pred_add, axis=0)
     return overall_pred, overall_pred_add
 
+
 if __name__ == '__main__':
     threshold = 0.2
-    tta_predictions, tta_predictions_add = k_fold_predict(n_splits=4)
+    # tta_predictions, tta_predictions_add = k_fold_predict(n_splits=4)
+    # make predictions for both standard and additional data
+    tta_predictions = make_tta_prediction(model, test_dl, test_dl_aug, 4)
+    tta_predictions_add = make_tta_prediction(model, test_add_dl, test_add_dl_aug, 4)
+    # soft predictions > hard predictions
     logger.info('Thresholding predictions')
     tta_predictions_hard = tta_predictions > threshold
-    tta_predictions_add_hard = tta_add_predictions > threshold
+    tta_predictions_add_hard = tta_predictions_add > threshold
+    # obtain tags from mlb matrix
     tags = test_ds.mlb.inverse_transform(tta_predictions_hard)
     tags_add = test_ds.mlb.inverse_transform(tta_predictions_add_hard)
+    # create prediction df
     logger.info('Creating prediction dataframe')
     test_result_df = pd.DataFrame({'image_name': partition['test'], 'tags': [' '.join(t) for t in tags]})
     test_add_result_df = pd.DataFrame({'image_name': partition['test_add'], 'tags': [' '.join(t) for t in tags_add]})
     test_result_df = pd.concat([test_result_df, test_add_result_df])
+    # save predictions to disk
     logger.info('Saving predictions to csv')
     submission_df = pd.read_csv(os.path.join(DATA_DIR, 'sample_submission_v2.csv'))
     submission_df.drop('tags', axis=1, inplace=True)
     submission_df = submission_df.merge(test_result_df, on='image_name')
-    submission_df.to_csv('out_kfold4.csv', index=False)
+    submission_df.to_csv('%s.csv' % run_name, index=False)
 
 
 

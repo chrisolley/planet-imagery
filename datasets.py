@@ -14,6 +14,7 @@ class PlanetDataset(Dataset):
         self.img_folder = img_folder
         self.mlb = MultiLabelBinarizer()
         self.y = self.mlb.fit_transform([tag.split() for tag in self.df.tags])
+        self.y = dict(zip(self.df['image_name'], self.y))
         self.transforms = transforms
 
     def __len__(self):
@@ -33,4 +34,4 @@ class PlanetDataset(Dataset):
         else:
             x = center_crop(x)
         x = normalize(x)
-        return np.rollaxis(x, 2), self.y[idx]
+        return np.rollaxis(x, 2), self.y[name]
