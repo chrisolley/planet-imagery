@@ -24,57 +24,26 @@ from validation import validate
 
 
 # directories
-DATA_DIR = os.path.abspath('./data')
+DATA_DIR = './data'
 TEST_JPEG_DIR = os.path.join(DATA_DIR, 'test-jpg')
 TEST_JPEG_ADD_DIR = os.path.join(DATA_DIR, 'test-jpg-additional')
 LOG_DIR = './logs'
 MODEL_DIR = './models'
 
-# read in data splits
-with open(os.path.join(DATA_DIR, 'partition.p'), 'rb') as f:
-    partition = pickle.load(f)
-
-# set up logs
-run_name = time.strftime("%Y-%m-%d_%H%M-") + "custom_net"
-logger = setup_logs(LOG_DIR, run_name)
-
-# create model save dir
-if not os.path.exists(MODEL_DIR):
-    os.makedirs(MODEL_DIR)
-
-# model
-model = Net(num_classes=17).cuda()
-
-# datasets
-train_ds = PlanetDataset(os.path.join(DATA_DIR, 'train-jpg'), 
-                         partition['inner_train'],
-                         os.path.join(DATA_DIR, 'train_v2.csv'),
-                         True)
-
-val_ds = PlanetDataset(os.path.join(DATA_DIR, 'train-jpg'),
-                       partition['validation'],
-                       os.path.join(DATA_DIR, 'train_v2.csv'))
-
-# data loaders
-batch_size = 64
-train_dl = DataLoader(train_ds,
-                      batch_size=batch_size,
-                      num_workers=4,
-                      pin_memory=True,
-                      shuffle=True)
-
-val_dl = DataLoader(val_ds,
-                    batch_size=batch_size,
-                    num_workers=4,
-                    pin_memory=True)
+# training parameters
+BASE_OPTIMIZER = optim.Adam
+INIT_LR = 0.001
+BATCH_SIZE = 64
+EPOCHS = 40
+MODEL = Net(num_classes=17).cuda()
 
 # training loop
-def train(model, base_optimizer, init_lr, epochs, train_dl, val_dl):
+def train(model, epochs, train_dl, val_dl):
     best_score = 0.0
-    optimizer = base_optimizer(model.parameters(), lr=init_lr)
+    optimizer = BASE_OPTIMIZER(model.parameters(), lr=INIT_LR)
     for epoch in range(epochs):
-        lr = lr_scheduler(epoch, 0.1, init_lr, 5)
-        optimizer = base_optimizer(model.parameters(), lr=lr)
+        lr = lr_scheduler(epoch, 0.1, INIT_LR, 5)
+        optimizer = BASE_OPTIMIZER(model.parameters(), lr=lr)
         for batch_idx, (data, target) in enumerate(train_dl):
             data, target = data.cuda().float(), target.cuda().float()
             output = model(data)
@@ -95,12 +64,41 @@ def train(model, base_optimizer, init_lr, epochs, train_dl, val_dl):
             logger.info("Saving model to %s" % file_path)
             save_model(model, file_path)
 
+def main(model, run_name, partition, batch_size, epochs):
+    # datasets
+    train_ds = PlanetDataset(os.path.join(DATA_DIR, 'train-jpg'), 
+                            partition['inner_train'],
+                            os.path.join(DATA_DIR, 'train_v2.csv'),
+                            True)
+
+    val_ds = PlanetDataset(os.path.join(DATA_DIR, 'train-jpg'),
+                        partition['validation'],
+                        os.path.join(DATA_DIR, 'train_v2.csv'))
+
+    # data loaders
+    batch_size = 64
+    train_dl = DataLoader(train_ds,
+                        batch_size=batch_size,
+                        num_workers=4,
+                        pin_memory=True,
+                        shuffle=True)
+
+    val_dl = DataLoader(val_ds,
+                        batch_size=batch_size,
+                        num_workers=4,
+                        pin_memory=True)
+
+    train(model, epochs, train_dl, val_dl)
+
 if __name__ == '__main__':
-    # model
-    model = Net(num_classes=17).cuda()
-    # lr
-    base_optimizer = optim.Adam
-    init_lr = 0.001
-    # training
-    epochs = 40
-    train(model, base_optimizer, init_lr, epochs, train_dl, val_dl)
+    # create model save dir if required
+    if not os.path.exists(MODEL_DIR):
+        os.makedirs(MODEL_DIR)
+    # read in data splits
+    with open(os.path.join(DATA_DIR, 'partition.p'), 'rb') as f:
+        partition = pickle.load(f)
+    # set up logs
+    run_name = time.strftime("%Y-%m-%d_%H%M-") + "custom_net"
+    logger = setup_logs(LOG_DIR, run_name)
+    # train model
+    train(MODEL, run_name, partition, BATCH_SIZE, EPOCHS)

@@ -107,6 +107,9 @@ def main(model, run_name, partition, batch_size, epochs):
 
 
 if __name__ == '__main__':
+    # create model save dir if required
+    if not os.path.exists(MODEL_DIR):
+        os.makedirs(MODEL_DIR)
     # read in data splits
     with open(os.path.join(DATA_DIR, 'partition.p'), 'rb') as f:
         partition = pickle.load(f)
