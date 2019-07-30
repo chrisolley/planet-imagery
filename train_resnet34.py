@@ -21,6 +21,8 @@ from optimizer import lr_scheduler, create_optimizer
 from logger import setup_logs
 from helper_functions import save_model
 from validation import validate
+import mlflow
+import argparse
 
 # directories
 DATA_DIR = './data'
@@ -29,21 +31,26 @@ MODEL_DIR = './models'
 
 # training parameters
 BASE_OPTIMIZER = optim.Adam
-INIT_LR_0 = 0.01
 DIFF_LR_FACTORS = [9, 3, 1]
-BATCH_SIZE = 64
-EPOCHS = 40
 MODEL = Resnet34(num_classes=17).cuda()
+parser = argparse.ArgumentParser(description='Resnet34 Training')
+parser.add_argument('--init-lr-0', type=int, default=0.01,
+                    help='initial learning rate for group 0 (default: 0.01')
+parser.add_argument('--batch-size', type=int, default=64,
+                    help='batch size for training (default: 64')
+parser.add_argument('--epochs', type=int, default=40,
+                    help='number of epochs to train (default: 40)')
+args = parser.parse_args()
 
 # training loop
 def train(model, epochs, train_dl, val_dl):
     best_score = 0.0
     # create optimizer with differential learning rates
-    optimizer = create_optimizer(model, BASE_OPTIMIZER, INIT_LR_0, DIFF_LR_FACTORS)
+    optimizer = create_optimizer(model, BASE_OPTIMIZER, args.init_lr_0, DIFF_LR_FACTORS)
     iterations = epochs*len(train_dl)
     idx = 0
     for epoch in range(epochs):
-        lr0 = lr_scheduler(epoch, 0.1, INIT_LR_0, 5)  # set base lr for this epoch
+        lr0 = lr_scheduler(epoch, 0.1, args.init_lr_0, 5)  # set base lr for this epoch
         optimizer = create_optimizer(model, BASE_OPTIMIZER, lr0, DIFF_LR_FACTORS)
         # training loop
         for batch_idx, (data, target) in enumerate(train_dl):
@@ -64,10 +71,13 @@ def train(model, epochs, train_dl, val_dl):
             if batch_idx % 100 == 0:
                 logger.info("Epoch %d (Batch %d / %d)\t Train loss: %.3f" % \
                     (epoch+1, batch_idx, len(train_dl), loss.item()))
+                mlflow.log_metric('train_loss', loss.item())
         # validation
         val_f2_score, val_loss = validate(model, val_dl, 0.2)
         logger.info("Epoch %d \t Validation loss: %.3f, F2 score: %.3f" % \
             (epoch+1, val_loss, val_f2_score))
+        mlflow.log_metric('val_loss', val_loss)
+        mlflow.log_metric('val_f2_score', val_f2_score)
         # model saving
         if val_f2_score > best_score:
             best_score = val_f2_score
@@ -115,4 +125,7 @@ if __name__ == '__main__':
     run_name = time.strftime("%Y-%m-%d_%H%M-") + "resnet34"
     logger = setup_logs(LOG_DIR, run_name)
     # train model
-    main(MODEL, run_name, partition, BATCH_SIZE, EPOCHS)
+    with mlflow.start_run():
+        for key, value in vars(args).items():
+            mlflow.log_param(key, value)
+        main(MODEL, run_name, partition, args.batch_size, args.epochs)
