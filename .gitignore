@@ -2,6 +2,8 @@ todo.txt
 .ipynb_checkpoints/
 .vscode/
 __pycache__/
+__MACOSX/
 data/
 models/
+logs/
 out.csv
