@@ -21,7 +21,8 @@ from optimizer import lr_scheduler, create_optimizer
 from logger import setup_logs
 from helper_functions import save_model
 from validation import validate
-
+import mlflow
+import argparse
 
 # directories
 DATA_DIR = './data'
@@ -30,37 +31,56 @@ MODEL_DIR = './models'
 
 # training parameters
 BASE_OPTIMIZER = optim.Adam
-INIT_LR = 0.001
-BATCH_SIZE = 64
-EPOCHS = 40
 MODEL = Net(num_classes=17).cuda()
+parser = argparse.ArgumentParser(description='Custom Net Training')
+parser.add_argument('--init-lr', type=int, default=0.001,
+                    help='initial learning rate for group 0 (default: 0.001')
+parser.add_argument('--lr-decay-epoch', type=int, default=5,
+                help='epoch number before lr decay (default: 5')
+parser.add_argument('--lr-decay-factor', type=int, default=0.1,
+                help='epoch number before lr decay (default: 0.1')              
+parser.add_argument('--batch-size', type=int, default=64,
+                    help='batch size for training (default: 64')
+parser.add_argument('--epochs', type=int, default=40,
+                    help='number of epochs to train (default: 40)')
+args = parser.parse_args()
 
 # training loop
 def train(model, epochs, train_dl, val_dl):
     best_score = 0.0
-    optimizer = BASE_OPTIMIZER(model.parameters(), lr=INIT_LR)
+    optimizer = BASE_OPTIMIZER(model.parameters(), lr=args.init_lr)
     for epoch in range(epochs):
-        lr = lr_scheduler(epoch, 0.1, INIT_LR, 5)
+        lr = lr_scheduler(epoch, args.lr_decay_factor, args.init_lr, args.lr_decay_epoch)
         optimizer = BASE_OPTIMIZER(model.parameters(), lr=lr)
+        total_loss = 0
         for batch_idx, (data, target) in enumerate(train_dl):
             data, target = data.cuda().float(), target.cuda().float()
             output = model(data)
             loss = F.binary_cross_entropy_with_logits(output, target)
+            total_loss += loss.item()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             if batch_idx % 100 == 0:
                 logger.info("Epoch %d (Batch %d / %d)\t Train loss: %.3f" % \
                     (epoch+1, batch_idx, len(train_dl), loss.item()))
+        # train loss
+        train_loss = total_loss / len(train_dl)
+        logger.info("Epoch %d\t Train loss: %.3f") % (epoch+1, train_loss)
+        mlflow.log_metric('train_loss', train_loss, step=epoch)
+        # validation scores
         val_f2_score, val_loss = validate(model, val_dl, 0.2)
         logger.info("Epoch %d \t Validation loss: %.3f, F2 score: %.3f" % \
             (epoch+1, val_loss, val_f2_score))
+        mlflow.log_metric('val_loss', val_loss, step=epoch)
+        mlflow.log_metric('val_f2_score', val_f2_score, step=epoch)
         if val_f2_score > best_score:
             best_score = val_f2_score
-            file_path = os.path.join('models', 'model_net_%d.pth' % \
+            best_model_path = os.path.join('models', 'model_net_%d.pth' % \
                 (100*val_f2_score))
-            logger.info("Saving model to %s" % file_path)
-            save_model(model, file_path)
+            logger.info("Saving model to %s" % best_model_path)
+            save_model(model, best_model_path)
+
 
 def main(model, run_name, partition, batch_size, epochs):
     # datasets
@@ -87,6 +107,7 @@ def main(model, run_name, partition, batch_size, epochs):
 
     train(model, epochs, train_dl, val_dl)
 
+
 if __name__ == '__main__':
     # create model save dir if required
     if not os.path.exists(MODEL_DIR):
@@ -98,4 +119,7 @@ if __name__ == '__main__':
     run_name = time.strftime("%Y-%m-%d_%H%M-") + "custom_net"
     logger = setup_logs(LOG_DIR, run_name)
     # train model
-    train(MODEL, run_name, partition, BATCH_SIZE, EPOCHS)
+    with mlflow.start_run(run_name=run_name):
+        for key, value in vars(args).items():
+            mlflow.log_param(key, value)
+        main(MODEL, run_name, partition, args.batch_size, args.epochs, )
