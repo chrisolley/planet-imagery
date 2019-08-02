@@ -1,0 +1,4 @@
+['remote "s3remote"']
+url = s3://kaggle-satellite-imagery
+[core]
+remote = s3remote
