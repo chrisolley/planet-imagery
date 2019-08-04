@@ -6,6 +6,7 @@ import torch.nn.functional as F
 class Resnet34(nn.Module):
     def __init__(self, num_classes):
         super(Resnet34, self).__init__()
+        self.name = 'ResNet34'
         resnet = models.resnet34(pretrained=True)
         # freezing parameters
         for param in resnet.parameters():
@@ -55,3 +56,65 @@ class Net(nn.Module):
         x = F.dropout(x)
         x = self.fc2(x)
         return x
+
+
+class VGG19(nn.Module):
+    def __init__(self, num_classes):
+        super(VGG19, self).__init__()
+        self.name = 'VGG19'
+        self.vgg = models.vgg19(pretrained=True)
+        # freezing parameters
+        for param in self.vgg.parameters():
+            param.requires_grad = False
+        # modify the final linear layer
+        num_features = self.vgg.classifier[6].in_features
+        self.vgg.classifier = self.vgg.classifier[:6]
+        # separate layers into three groups
+        layers = list(self.vgg.children())
+        self.groups = nn.ModuleList([nn.Sequential(*h) for h in [layers[:2], layers[2:]]])
+        self.groups.append(nn.Linear(num_features, num_classes))
+
+    def forward(self, x):
+        x = self.groups[0](x)
+        x = x.view(x.size(0), -1)
+        for group in self.groups[1:]:
+            x = group(x)
+        return x
+
+    def unfreeze(self,  group_idx: int):
+        group = self.groups[group_idx]
+        parameters = filter(lambda x: hasattr(x, 'requires_grad'),
+                            group.parameters())
+        for p in parameters:
+            p.requires_grad = True
+
+
+class VGG16(nn.Module):
+    def __init__(self, num_classes):
+        super(VGG16, self).__init__()
+        self.name = 'VGG16'
+        self.vgg = models.vgg16(pretrained=True)
+        # freezing parameters
+        for param in self.vgg.parameters():
+            param.requires_grad = False
+        # modify the final linear layer
+        num_features = self.vgg.classifier[6].in_features
+        self.vgg.classifier = self.vgg.classifier[:6]
+        # separate layers into three groups
+        layers = list(self.vgg.children())
+        self.groups = nn.ModuleList([nn.Sequential(*h) for h in [layers[:2], layers[2:]]])
+        self.groups.append(nn.Linear(num_features, num_classes))
+
+    def forward(self, x):
+        x = self.groups[0](x)
+        x = x.view(x.size(0), -1)
+        for group in self.groups[1:]:
+            x = group(x)
+        return x
+
+    def unfreeze(self,  group_idx: int):
+        group = self.groups[group_idx]
+        parameters = filter(lambda x: hasattr(x, 'requires_grad'),
+                            group.parameters())
+        for p in parameters:
+            p.requires_grad = True

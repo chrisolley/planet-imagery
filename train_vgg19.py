@@ -16,13 +16,14 @@ from torch.utils.data import DataLoader
 import torch.optim as optim
 import torch.nn.functional as F
 from datasets import PlanetDataset
-from models import Resnet34
+from models import VGG19
 from optimizer import lr_scheduler, create_optimizer
 from logger import setup_logs
 from helper_functions import save_model
 from validation import validate
 import mlflow
 import argparse
+import tempfile
 
 # directories
 DATA_DIR = './data'
@@ -30,35 +31,40 @@ LOG_DIR = './logs'
 MODEL_DIR = './models'
 
 # training parameters
-BASE_OPTIMIZER = optim.Adam
-DIFF_LR_FACTORS = [9, 3, 1]
-MODEL = Resnet34(num_classes=17).cuda()
-parser = argparse.ArgumentParser(description='Resnet34 Training')
+parser = argparse.ArgumentParser(description='VGG16Training')
 parser.add_argument('--init-lr-0', type=int, default=0.01,
                     help='initial learning rate for group 0 (default: 0.01')
-parser.add_argument('--lr-decay-epoch', type=int, default=5,
-                help='epoch number before lr decay (default: 5')
-parser.add_argument('--lr-decay-factor', type=int, default=0.1,
-                help='epoch number before lr decay (default: 0.1')              
-parser.add_argument('--batch-size', type=int, default=64,
-                    help='batch size for training (default: 64')
+# parser.add_argument('--lr-decay-epoch', type=int, default=5,
+#                 help='epoch number before lr decay (default: 5')
+# parser.add_argument('--lr-decay-factor', type=int, default=0.1,
+#                 help='epoch number before lr decay (default: 0.1')             
+parser.add_argument('--batch-size', type=int, default=32,
+                    help='batch size for training (default: 32')
 parser.add_argument('--epochs', type=int, default=40,
                     help='number of epochs to train (default: 40)')
+parser.add_argument('--patience', type=int, default=2,
+                    help='number of epochs to wait before reducing lr (default: 2)')
 args = parser.parse_args()
 
+
+MODEL = VGG19(num_classes=17).cuda()
+BASE_OPTIMIZER = optim.Adam
+DIFF_LR_FACTORS = [9, 3, 1]
 
 # training loop
 def train(model, epochs, train_dl, val_dl):
     best_score = 0.0
-    # create optimizer with differential learning rates
-    optimizer = create_optimizer(model, BASE_OPTIMIZER, args.init_lr_0, DIFF_LR_FACTORS)
+    lr0 = args.init_lr_0
     iterations = epochs*len(train_dl)
     idx = 0
+    # create optimizer with differential learning rates
+    optimizer = create_optimizer(MODEL, BASE_OPTIMIZER, args.init_lr_0, DIFF_LR_FACTORS)
+    # set up lr schedule based on val loss
+    lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience)
     for epoch in range(epochs):
-        lr0 = lr_scheduler(epoch, args.lr_decay_factor, args.init_lr_0, args.lr_decay_epoch)  # set base lr for this epoch
-        optimizer = create_optimizer(model, BASE_OPTIMIZER, lr0, DIFF_LR_FACTORS)
         total_loss = 0
         # training loop
+        model.train()
         for batch_idx, (data, target) in enumerate(train_dl):
             data, target = data.cuda().float(), target.cuda().float()
             output = model(data)
@@ -84,6 +90,8 @@ def train(model, epochs, train_dl, val_dl):
         mlflow.log_metric('train_loss', train_loss, step=epoch)
         # validation scores
         val_f2_score, val_loss = validate(model, val_dl, 0.2)
+        # lr monitoring val_loss
+        lr_scheduler.step(val_loss)
         logger.info("Epoch %d \t Validation loss: %.3f, F2 score: %.3f" % \
             (epoch+1, val_loss, val_f2_score))
         mlflow.log_metric('val_loss', val_loss, step=epoch)
@@ -91,7 +99,7 @@ def train(model, epochs, train_dl, val_dl):
         # model saving
         if val_f2_score > best_score:
             best_score = val_f2_score
-            best_model_path = os.path.join(MODEL_DIR, 'model_resnet34_%d.pth' % \
+            best_model_path = os.path.join(MODEL_DIR, 'model_VGG19_%d.pth' % \
                 (100*val_f2_score))
             logger.info("Saving model to %s" % best_model_path)
             save_model(model, best_model_path)
@@ -132,10 +140,15 @@ if __name__ == '__main__':
     with open(os.path.join(DATA_DIR, 'partition.p'), 'rb') as f:
         partition = pickle.load(f)
     # set up logs
-    run_name = time.strftime("%Y-%m-%d_%H%M-") + "resnet34"
+    run_name = time.strftime("%Y-%m-%d_%H%M-") + "VGG19"
     logger = setup_logs(LOG_DIR, run_name)
     # train model
     with mlflow.start_run(run_name=run_name):
+        mlflow.log_param('model', MODEL.name)
+        with open('/tmp/lr.txt', 'w') as f:
+            f.write('Optimizer:\t %s' % BASE_OPTIMIZER().__class__.__name__)
+            f.write('LR Group Factors:\t %s\n' % str(DIFF_LR_FACTORS))
+        mlflow.log_artifact('/tmp/lr.txt')
         for key, value in vars(args).items():
             mlflow.log_param(key, value)
         main(MODEL, run_name, partition, args.batch_size, args.epochs)

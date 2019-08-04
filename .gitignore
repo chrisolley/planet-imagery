@@ -6,4 +6,5 @@ __MACOSX/
 data/
 models/
 logs/
+mlruns/
 out.csv
